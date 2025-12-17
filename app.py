@@ -5,7 +5,7 @@ def check_password():
         st.session_state.authenticated = False
 
     if not st.session_state.authenticated:
-        st.title("🔒 NQ6 대시보드 접근 제한")
+        st.title("🔒 접근 제한")
         pwd = st.text_input("비밀번호를 입력하세요", type="password")
 
         if pwd:
