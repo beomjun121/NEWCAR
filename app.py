@@ -106,11 +106,10 @@ def nl_to_br(x):
     return str(x).replace("\n", "<br>")
 
 # =========================
-# ✅ 다가오는 일정 1건만 파란색 강조 (과거 제외 / index 기준)
+# 다가오는 일정 강조
 # =========================
 def highlight_next_schedule(display_df, original_df, date_col="일정"):
     today = pd.Timestamp.today().normalize()
-
     dt = original_df[date_col]
     valid = original_df.loc[(dt.notna()) & (dt >= today)]
 
@@ -215,7 +214,7 @@ def render_kpi_summary(title, df):
     c5.metric("📊 완료율", f"{r}%")
 
 # =========================
-# 🔥 이슈 테이블
+# 🔥 이슈 테이블 (글 안 짤림 수정)
 # =========================
 def render_issue_table(title, df):
     render_kpi_summary(title, df)
@@ -258,7 +257,18 @@ def render_issue_table(title, df):
         html += "<tr>"
         for c in cols:
             bg = "#FFE5E5" if r["개선현황"] == "진행중 🔴" else ""
-            html += f"<td style='border:1px solid #ddd; padding:6px; background:{bg}'>{r[c]}</td>"
+            html += (
+                "<td style='"
+                "border:1px solid #ddd;"
+                "padding:6px;"
+                f"background:{bg};"
+                "white-space:pre-wrap;"
+                "word-break:break-word;"
+                "overflow-wrap:break-word;"
+                "'>"
+                f"{r[c]}"
+                "</td>"
+            )
         html += "</tr>"
 
     html += "</tbody></table>"
@@ -270,28 +280,18 @@ def render_issue_table(title, df):
 with tabs[0]:
     render_master_schedule("고객 대일정 (월·분기)", schedule)
     st.markdown("---")
-
     d_tbl = schedule.copy()
     d_tbl["D-DAY"] = d_tbl["일정"].apply(calc_schedule_dday)
     d_tbl["일정"] = d_tbl["일정"].dt.strftime("%y.%m.%d")
-
-    st.dataframe(
-        highlight_next_schedule(d_tbl, schedule),
-        use_container_width=True
-    )
+    st.dataframe(highlight_next_schedule(d_tbl, schedule), use_container_width=True)
 
 with tabs[1]:
     render_master_schedule("사내 일정 (월·분기)", internal_schedule)
     st.markdown("---")
-
     d_tbl = internal_schedule.copy()
     d_tbl["D-DAY"] = d_tbl["일정"].apply(calc_schedule_dday)
     d_tbl["일정"] = d_tbl["일정"].dt.strftime("%y.%m.%d")
-
-    st.dataframe(
-        highlight_next_schedule(d_tbl, internal_schedule),
-        use_container_width=True
-    )
+    st.dataframe(highlight_next_schedule(d_tbl, internal_schedule), use_container_width=True)
 
 with tabs[2]:
     render_kpi_summary("고객 이슈", customer)
