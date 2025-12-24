@@ -42,6 +42,21 @@ internal = pd.read_excel("data/internal_issue.xlsx")
 supplier = pd.read_excel("data/supplier_issue.xlsx")
 design_review = pd.read_excel("data/design_review.xlsx")
 
+# =========================
+# 🔥 날짜 컬럼 시간 제거 (핵심)
+# =========================
+for df in [schedule, internal_schedule]:
+    if "일정" in df.columns:
+        df["일정"] = pd.to_datetime(df["일정"], errors="coerce").dt.normalize()
+
+for df in [customer, internal, supplier, design_review]:
+    for c in ["발생일", "적용일"]:
+        if c in df.columns:
+            df[c] = pd.to_datetime(df[c], errors="coerce").dt.normalize()
+
+# =========================
+# 분기 색상
+# =========================
 Q_COLORS = {
     1: "#E3F2FD",
     2: "#E8F5E9",
@@ -90,7 +105,7 @@ def highlight_next(row, idx):
     return ["background-color:#E3F2FD"] * len(row) if row.name == idx else [""] * len(row)
 
 # =========================
-# 날짜 포맷
+# 날짜 표시 포맷 (시간 제거용)
 # =========================
 def format_date_col(df, cols):
     d = df.copy()
@@ -100,7 +115,7 @@ def format_date_col(df, cols):
     return d
 
 # =========================
-# 일정 그래프 (글씨 키운 버전)
+# 일정 그래프
 # =========================
 def render_master_schedule(title, df):
     st.subheader(title)
@@ -170,9 +185,7 @@ def render_master_schedule(title, df):
             tickfont=dict(size=13),
             rangeslider=dict(visible=True, thickness=0.08)
         ),
-        yaxis=dict(
-            tickfont=dict(size=13)
-        ),
+        yaxis=dict(tickfont=dict(size=13)),
         margin=dict(t=110)
     )
 
@@ -253,14 +266,13 @@ def render_issue_table(title, df):
     )
 
 # =========================
-# 탭별 화면 (그래프 + 아래 표 복구!)
+# 탭별 화면
 # =========================
 with tabs[0]:
     render_master_schedule("고객 대일정 (월·분기)", schedule)
     st.markdown("---")
 
     d_tbl = schedule.copy()
-    d_tbl["일정"] = pd.to_datetime(d_tbl["일정"], errors="coerce")
     d_tbl["D-DAY"] = d_tbl["일정"].apply(calc_schedule_dday)
     d_tbl["일정"] = d_tbl["일정"].dt.strftime("%y.%m.%d")
 
@@ -278,7 +290,6 @@ with tabs[1]:
     st.markdown("---")
 
     d_tbl = internal_schedule.copy()
-    d_tbl["일정"] = pd.to_datetime(d_tbl["일정"], errors="coerce")
     d_tbl["D-DAY"] = d_tbl["일정"].apply(calc_schedule_dday)
     d_tbl["일정"] = d_tbl["일정"].dt.strftime("%y.%m.%d")
 
