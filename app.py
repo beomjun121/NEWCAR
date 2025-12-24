@@ -10,7 +10,6 @@ def check_password():
     if not st.session_state.authenticated:
         st.title("🔒 접근 제한")
         pwd = st.text_input("비밀번호를 입력하세요", type="password")
-
         if pwd:
             if pwd == "NQ0716":
                 st.session_state.authenticated = True
@@ -43,7 +42,7 @@ supplier = pd.read_excel("data/supplier_issue.xlsx")
 design_review = pd.read_excel("data/design_review.xlsx")
 
 # =========================
-# 🔥 날짜 컬럼 시간 제거 (핵심)
+# 날짜 컬럼 정리 (datetime 유지)
 # =========================
 for df in [schedule, internal_schedule]:
     if "일정" in df.columns:
@@ -83,30 +82,17 @@ tabs = st.tabs([
 def normalize_status(x):
     return "완료" if "완료" in str(x) else "진행중"
 
-def calc_schedule_dday(schedule_date):
-    if pd.isna(schedule_date):
+def calc_schedule_dday(d):
+    if pd.isna(d):
         return ""
     today = pd.Timestamp.today().normalize()
-    diff = (schedule_date - today).days
+    diff = (d - today).days
     if diff < 0:
         return ""
     if diff == 0:
         return "D-DAY"
     return f"D-{diff}"
 
-def get_next_schedule_idx(df):
-    today = pd.Timestamp.today().normalize()
-    d = df.copy()
-    d["일정"] = pd.to_datetime(d["일정"], errors="coerce")
-    future = d[d["일정"] >= today].sort_values("일정")
-    return future.index[0] if not future.empty else None
-
-def highlight_next(row, idx):
-    return ["background-color:#E3F2FD"] * len(row) if row.name == idx else [""] * len(row)
-
-# =========================
-# 날짜 표시 포맷 (시간 제거용)
-# =========================
 def format_date_col(df, cols):
     d = df.copy()
     for c in cols:
@@ -114,33 +100,50 @@ def format_date_col(df, cols):
             d[c] = pd.to_datetime(d[c], errors="coerce").dt.strftime("%y.%m.%d")
     return d
 
+def nl_to_br(x):
+    if pd.isna(x):
+        return ""
+    return str(x).replace("\n", "<br>")
+
+# =========================
+# ✅ 다가오는 일정 1건만 파란색 강조 (과거 제외 / index 기준)
+# =========================
+def highlight_next_schedule(display_df, original_df, date_col="일정"):
+    today = pd.Timestamp.today().normalize()
+
+    dt = original_df[date_col]
+    valid = original_df.loc[(dt.notna()) & (dt >= today)]
+
+    if valid.empty:
+        return display_df.style
+
+    next_idx = valid.loc[dt.loc[valid.index].idxmin()].name
+
+    def style_row(row):
+        if row.name == next_idx:
+            return ["background-color:#E3F2FD"] * len(row)
+        return [""] * len(row)
+
+    return display_df.style.apply(style_row, axis=1)
+
 # =========================
 # 일정 그래프
 # =========================
 def render_master_schedule(title, df):
     st.subheader(title)
-
-    d = df.copy()
-    d["일정"] = pd.to_datetime(d["일정"], errors="coerce")
-    d = d.dropna(subset=["일정"])
-
+    d = df.dropna(subset=["일정"]).copy()
     fig = go.Figure()
 
     q_range = pd.period_range(d["일정"].min(), d["일정"].max(), freq="Q")
     for q in q_range:
         fig.add_vrect(
-            x0=q.start_time,
-            x1=q.end_time,
+            x0=q.start_time, x1=q.end_time,
             fillcolor=Q_COLORS[q.quarter],
-            opacity=0.35,
-            layer="below",
-            line_width=0
+            opacity=0.35, layer="below", line_width=0
         )
         fig.add_annotation(
             x=q.start_time + (q.end_time - q.start_time) / 2,
-            y=1.10,
-            xref="x",
-            yref="paper",
+            y=1.10, xref="x", yref="paper",
             text=f"{q.year} Q{q.quarter}",
             showarrow=False,
             font=dict(size=18, family="Arial Black")
@@ -166,91 +169,76 @@ def render_master_schedule(title, df):
     today = pd.to_datetime(date.today())
     fig.add_vline(x=today, line_dash="dash", line_color="red")
     fig.add_annotation(
-        x=today,
-        y=1.08,
-        xref="x",
-        yref="paper",
-        text="NOW",
-        showarrow=False,
+        x=today, y=1.08, xref="x", yref="paper",
+        text="NOW", showarrow=False,
         font=dict(color="red", size=18, family="Arial Black")
     )
 
     fig.update_layout(
         height=560,
-        dragmode="pan",
-        font=dict(size=14),
         xaxis=dict(
             dtick="M1",
             tickformat="%Y-%m",
-            tickfont=dict(size=13),
             rangeslider=dict(visible=True, thickness=0.08)
         ),
-        yaxis=dict(tickfont=dict(size=13)),
         margin=dict(t=110)
     )
 
     st.plotly_chart(fig, use_container_width=True)
 
 # =========================
-# KPI / 이슈 테이블
+# KPI
 # =========================
 def compute_kpi(df):
     today = pd.Timestamp.today().normalize()
     d = df.copy()
-
     d["개선현황"] = d["개선현황"].apply(normalize_status)
     d["_적용일_dt"] = pd.to_datetime(d["적용일"], errors="coerce")
 
     total = len(d)
     done = (d["개선현황"] == "완료").sum()
-    overdue = ((d["개선현황"] != "완료") & pd.notna(d["_적용일_dt"]) & (d["_적용일_dt"] < today)).sum()
+    overdue = ((d["개선현황"] != "완료") &
+               pd.notna(d["_적용일_dt"]) &
+               (d["_적용일_dt"] < today)).sum()
     ing = total - done - overdue
     rate = round(done / total * 100, 1) if total else 0
-
     return total, done, ing, overdue, rate
 
 def render_kpi_summary(title, df):
     st.subheader(f"{title} KPI 요약")
     t, d, i, o, r = compute_kpi(df)
-
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("📦 전체", t)
     c2.metric("✅ 완료", d)
     c3.metric("🟡 진행중", i)
-    c4.metric("🔴 진행중(기한초과)", o)
+    c4.metric("🔴 기한초과", o)
     c5.metric("📊 완료율", f"{r}%")
 
+# =========================
+# 🔥 이슈 테이블
+# =========================
 def render_issue_table(title, df):
     render_kpi_summary(title, df)
     st.markdown("---")
 
-    d_calc = df.copy()
-    d_calc["개선현황"] = d_calc["개선현황"].apply(normalize_status)
-    d_calc["_적용일_dt"] = pd.to_datetime(d_calc["적용일"], errors="coerce")
-
-    d_disp = df.copy()
-    for col in ["문제점","개선안","발행부서","대응부서"]:
-        if col not in d_disp.columns:
-            d_disp[col] = ""
-            d_calc[col] = ""
-
-    d_disp = format_date_col(d_disp, ["발생일","적용일"])
+    d = df.copy()
+    d["개선현황_raw"] = d["개선현황"].apply(normalize_status)
+    d["_적용일_dt"] = pd.to_datetime(d["적용일"], errors="coerce")
     today = pd.Timestamp.today().normalize()
 
-    def _display_status(row):
-        if row["개선현황"] == "완료":
+    def status(row):
+        if row["개선현황_raw"] == "완료":
             return "완료 🟢"
         if pd.notna(row["_적용일_dt"]) and row["_적용일_dt"] < today:
             return "진행중 🔴"
         return "진행중 🟡"
 
-    d_disp["개선현황"] = d_calc.apply(_display_status, axis=1)
+    d["개선현황"] = d.apply(status, axis=1)
+    d = format_date_col(d, ["발생일", "적용일"])
 
-    def _highlight(row):
-        r = d_calc.loc[row.name]
-        if r["개선현황"] != "완료" and pd.notna(r["_적용일_dt"]) and r["_적용일_dt"] < today:
-            return ["background-color:#FFE5E5"] * len(row)
-        return [""] * len(row)
+    for c in ["문제점", "개선안"]:
+        if c in d.columns:
+            d[c] = d[c].apply(nl_to_br)
 
     cols = [
         "NO","활동항목","발생일","차종",
@@ -258,12 +246,23 @@ def render_issue_table(title, df):
         "문제점","개선안",
         "적용일","개선현황"
     ]
-    cols = [c for c in cols if c in d_disp.columns]
+    cols = [c for c in cols if c in d.columns]
 
-    st.dataframe(
-        d_disp[cols].style.apply(_highlight, axis=1),
-        use_container_width=True
-    )
+    html = "<table style='width:100%; border-collapse:collapse; font-size:14px;'>"
+    html += "<thead><tr>"
+    for c in cols:
+        html += f"<th style='border:1px solid #ccc; padding:6px; background:#f5f5f5'>{c}</th>"
+    html += "</tr></thead><tbody>"
+
+    for _, r in d.iterrows():
+        html += "<tr>"
+        for c in cols:
+            bg = "#FFE5E5" if r["개선현황"] == "진행중 🔴" else ""
+            html += f"<td style='border:1px solid #ddd; padding:6px; background:{bg}'>{r[c]}</td>"
+        html += "</tr>"
+
+    html += "</tbody></table>"
+    st.markdown(html, unsafe_allow_html=True)
 
 # =========================
 # 탭별 화면
@@ -277,11 +276,7 @@ with tabs[0]:
     d_tbl["일정"] = d_tbl["일정"].dt.strftime("%y.%m.%d")
 
     st.dataframe(
-        d_tbl.style.apply(
-            highlight_next,
-            axis=1,
-            idx=get_next_schedule_idx(schedule)
-        ),
+        highlight_next_schedule(d_tbl, schedule),
         use_container_width=True
     )
 
@@ -294,11 +289,7 @@ with tabs[1]:
     d_tbl["일정"] = d_tbl["일정"].dt.strftime("%y.%m.%d")
 
     st.dataframe(
-        d_tbl.style.apply(
-            highlight_next,
-            axis=1,
-            idx=get_next_schedule_idx(internal_schedule)
-        ),
+        highlight_next_schedule(d_tbl, internal_schedule),
         use_container_width=True
     )
 
